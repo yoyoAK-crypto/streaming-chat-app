@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chat</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+    #log { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; min-height: 300px; max-height: 60vh; overflow-y: auto; margin: 1rem 0; }
+    .msg { white-space: pre-wrap; margin: 0.5rem 0; }
+    .user { color: #1a4fd6; }
+    input { padding: 0.5rem; }
+    #message { width: 70%; }
+    #error { color: #c00; }
+  </style>
+</head>
+<body>
+  <h1>Chat</h1>
+
+  <!-- Login / signup -->
+  <div id="auth">
+    <form id="auth-form">
+      <input id="username" placeholder="username" required>
+      <input id="password" type="password" placeholder="password" required>
+      <button type="submit">Log in</button>
+      <button type="button" id="signup-btn">Sign up</button>
+    </form>
+    <p id="error"></p>
+  </div>
+
+  <!-- Chat -->
+  <div id="chat" style="display: none">
+    <button id="logout-btn">Log out</button>
+    <div id="log"></div>
+    <form id="chat-form">
+      <input id="message" placeholder="Type a message" autocomplete="off" required>
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <script>
+    let token = null;
+    let conversationId = crypto.randomUUID();
+
+    const authBox = document.getElementById("auth");
+    const chatBox = document.getElementById("chat");
+    const errorEl = document.getElementById("error");
+    const log = document.getElementById("log");
+
+    function showChat() {
+      authBox.style.display = "none";
+      chatBox.style.display = "block";
+      errorEl.textContent = "";
+    }
+
+    function showLogin(message) {
+      token = null;
+      conversationId = crypto.randomUUID();
+      chatBox.style.display = "none";
+      authBox.style.display = "block";
+      errorEl.textContent = message || "";
+    }
+
+    async function authRequest(path) {
+      const username = document.getElementById("username").value;
+      const password = document.getElementById("password").value;
+      return fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+    }
+
+    async function login() {
+      const res = await authRequest("/login");
+      if (!res.ok) {
+        errorEl.textContent = "Wrong username or password";
+        return;
+      }
+      const data = await res.json();
+      token = data.access_token;
+      showChat();
+    }
+
+    document.getElementById("auth-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      login();
+    });
+
+    document.getElementById("signup-btn").addEventListener("click", async () => {
+      const res = await authRequest("/signup");
+      if (!res.ok) {
+        errorEl.textContent = "Could not sign up (username may be taken)";
+        return;
+      }
+      await login();
+    });
+
+    document.getElementById("logout-btn").addEventListener("click", () => {
+      log.innerHTML = "";
+      conversationId = crypto.randomUUID();
+      showLogin("");
+    });
+
+    function addMessage(role, text) {
+      const el = document.createElement("div");
+      el.className = "msg " + role;
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+      return el;
+    }
+
+    document.getElementById("chat-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("message");
+      const text = input.value;
+      input.value = "";
+
+      addMessage("user", "You: " + text);
+      const botEl = addMessage("bot", "");
+
+      const res = await fetch("/chat/stream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token,
+        },
+        body: JSON.stringify({ conversation_id: conversationId, message: text }),
+      });
+
+      if (res.status === 401) {
+        showLogin("Session expired, please log in again");
+        return;
+      }
+      if (!res.ok) {
+        botEl.textContent = "Error " + res.status;
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const events = buffer.split("\n\n");
+        buffer = events.pop();
+
+        for (const event of events) {
+          if (!event.startsWith("data: ")) continue;
+          const payload = event.slice(6);
+          if (payload === "[DONE]") return;
+          botEl.textContent += JSON.parse(payload).text;
+          log.scrollTop = log.scrollHeight;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
