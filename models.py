@@ -4,12 +4,11 @@ from db import Base
 
 class Conversation(Base):
     __tablename__ = "conversations"
-
     id = Column(String, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    title = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
+    
 class Message(Base):
     __tablename__ = "messages"
 
@@ -27,3 +26,5 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+
+

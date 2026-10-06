@@ -72,6 +72,8 @@ FastAPI, SQLAlchemy, PostgreSQL, Alembic, Groq (through the OpenAI Python SDK), 
 | POST | `/login` | Returns an access token |
 | POST | `/chat/stream` | Streams a reply (auth required) |
 | GET | `/` | Serves the chat page |
+| GET | `/conversations` | Lists your conversations (auth required) |
+| GET | `/conversations/{id}/messages` | Returns one conversation's messages (auth required) |
 
 ## Notes
 

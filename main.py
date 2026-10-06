@@ -6,6 +6,7 @@ from openai import OpenAI
 from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 import json
+from datetime import datetime
 
 import models
 from db import engine, SessionLocal, Base, get_db
@@ -36,8 +37,60 @@ class UserOut(BaseModel):
     username: str
     model_config = {"from_attributes": True}
 
+class ConversationOut(BaseModel):
+    id: str
+    title: str | None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class MessageOut(BaseModel):
+    role: str
+    content: str
+    model_config = {"from_attributes": True}
+
+def get_current_db_user(
+    db: Session = Depends(get_db),
+    username: str = Depends(get_current_user),
+):
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return user
+
 app = FastAPI()
 MODEL = "openai/gpt-oss-20b"
+
+
+@app.get("/conversations", response_model=list[ConversationOut])
+def list_conversations(
+    user: models.User = Depends(get_current_db_user),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(models.Conversation)
+        .filter(models.Conversation.user_id == user.id)
+        .order_by(models.Conversation.created_at.desc())
+        .all()
+    )
+
+
+@app.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
+def get_messages(
+    conversation_id: str,
+    user: models.User = Depends(get_current_db_user),
+    db: Session = Depends(get_db),
+):
+    conversation = db.get(models.Conversation, conversation_id)
+    if conversation is None or conversation.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return (
+        db.query(models.Message)
+        .filter(models.Message.conversation_id == conversation_id)
+        .order_by(models.Message.id)
+        .all()
+    )
+
 
 
 @app.post("/signup", response_model=UserOut)
@@ -96,13 +149,14 @@ def chat_stream(
         raise HTTPException(status_code=401, detail="Invalid token")
 
     conversation_id = request.conversation_id
+
     conversation = db.get(models.Conversation, conversation_id)
     if conversation is None:
-        db.add(models.Conversation(id=conversation_id, user_id=user.id))
+        db.add(models.Conversation(id=conversation_id, user_id=user.id, title=request.message[:40]))
         db.commit()
     elif conversation.user_id != user.id:
         raise HTTPException(status_code=404, detail="Conversation not found")
-
+    
     db.add(models.Message(conversation_id=conversation_id, role="user", content=request.message))
     db.commit()
 
