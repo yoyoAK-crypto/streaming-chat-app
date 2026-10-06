@@ -61,6 +61,13 @@ def get_current_db_user(
 app = FastAPI()
 MODEL = "openai/gpt-oss-20b"
 
+SYSTEM_PROMPT = (
+    "You are Atlas, a friendly assistant for someone learning AI engineering. "
+    "Keep answers short and clear, use plain language, and give a small example "
+    "when you explain something."
+)
+
+MAX_HISTORY = 20
 
 @app.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(
@@ -163,12 +170,21 @@ def chat_stream(
     rows = (
         db.query(models.Message)
         .filter(models.Message.conversation_id == conversation_id)
-        .order_by(models.Message.id)
+        .order_by(models.Message.id.desc())
+        .limit(MAX_HISTORY)
         .all()
     )
+
+    rows.reverse()
     history = [{"role": m.role, "content": m.content} for m in rows]
 
-    stream = client.chat.completions.create(model=MODEL, messages=history, stream=True)
+    stream = client.chat.completions.create(
+        
+        model=MODEL, 
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history, 
+        stream=True,
+    
+    )
 
     def event_stream():
         full_reply = ""
