@@ -10,6 +10,7 @@ A chat app where replies stream in token by token. Built with FastAPI, Postgres 
 - Each conversation belongs to a user; other users get a 404 for it
 - Schema changes managed with Alembic migrations
 - Plain HTML and JavaScript frontend (no framework)
+- Configurable system prompt and capped history window (MAX_HISTORY)
 
 ## Stack
 

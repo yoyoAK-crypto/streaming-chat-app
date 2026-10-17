@@ -13,9 +13,9 @@ from db import engine, SessionLocal, Base, get_db
 from models import Conversation, Message, User
 from auth import hash_password, verify_password, create_access_token, get_current_user
 
-load_dotenv()
+from tools import TOOLS, AVAILABLE_TOOLS
 
-Base.metadata.create_all(bind=engine)
+load_dotenv()
 
 client = OpenAI(
     api_key =os.getenv('GROQ_API_KEY'),
@@ -68,6 +68,7 @@ SYSTEM_PROMPT = (
 )
 
 MAX_HISTORY = 20
+USER_TOOLS = {"save_note", "list_notes"}
 
 @app.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(
@@ -145,6 +146,74 @@ def chat(request: ChatRequest):# FastAPI parses the JSON body into this object, 
     return {"reply": response.choices[0].message.content}
 
 
+
+def stream_with_tools(messages, user_id, max_rounds=5):
+    """Yields ("text", piece) and ("tool", name) items, running tools as needed."""
+    for _ in range(max_rounds):
+        stream = client.chat.completions.create(
+            model=MODEL, messages=messages, tools=TOOLS, stream=True
+        )
+
+        text = ""
+        calls = {}  # tool call index -> collected id, name and arguments
+
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            if delta.content:
+                text += delta.content
+                yield ("text", delta.content)
+
+            for tc in delta.tool_calls or []:
+                entry = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if tc.id:
+                    entry["id"] = tc.id
+                if tc.function and tc.function.name:
+                    entry["name"] = tc.function.name
+                if tc.function and tc.function.arguments:
+                    entry["arguments"] += tc.function.arguments
+
+        # no tool requested: the streamed text was the final answer
+        if not calls:
+            return
+
+        ordered = [calls[i] for i in sorted(calls)]
+        messages.append(
+            {
+                "role": "assistant",
+                "content": text,
+                "tool_calls": [
+                    {
+                        "id": c["id"],
+                        "type": "function",
+                        "function": {"name": c["name"], "arguments": c["arguments"]},
+                    }
+                    for c in ordered
+                ],
+            }
+        )
+
+        for c in ordered:
+            yield ("tool", c["name"])
+            try:
+                args = json.loads(c["arguments"] or "{}")
+                if c["name"] in USER_TOOLS:
+                    args["user_id"] = user_id  # overwrite anything the model sent
+                    result = AVAILABLE_TOOLS[c["name"]](**args)
+            except Exception as e:
+                result = {"error": f"Tool failed: {e}"}
+            print(f"[tool] {c['name']}({c['arguments']}) -> {result}")
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": c["id"],
+                    "content": json.dumps(result),
+                }
+            )
+
+
 @app.post("/chat/stream")
 def chat_stream(
     request: ChatRequest,
@@ -156,14 +225,13 @@ def chat_stream(
         raise HTTPException(status_code=401, detail="Invalid token")
 
     conversation_id = request.conversation_id
-
     conversation = db.get(models.Conversation, conversation_id)
     if conversation is None:
         db.add(models.Conversation(id=conversation_id, user_id=user.id, title=request.message[:40]))
         db.commit()
     elif conversation.user_id != user.id:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    
+
     db.add(models.Message(conversation_id=conversation_id, role="user", content=request.message))
     db.commit()
 
@@ -174,25 +242,19 @@ def chat_stream(
         .limit(MAX_HISTORY)
         .all()
     )
-
     rows.reverse()
     history = [{"role": m.role, "content": m.content} for m in rows]
 
-    stream = client.chat.completions.create(
-        
-        model=MODEL, 
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + history, 
-        stream=True,
-    
-    )
-
     def event_stream():
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
         full_reply = ""
-        for chunk in stream:
-            text = chunk.choices[0].delta.content
-            if text:
-                full_reply += text
-                yield f"data: {json.dumps({'text': text})}\n\n"
+
+        for kind, value in stream_with_tools(messages, user.id):
+            if kind == "tool":
+                yield f"data: {json.dumps({'tool': value})}\n\n"
+            else:
+                full_reply += value
+                yield f"data: {json.dumps({'text': value})}\n\n"
 
         with SessionLocal() as save_db:
             save_db.add(models.Message(conversation_id=conversation_id, role="assistant", content=full_reply))
