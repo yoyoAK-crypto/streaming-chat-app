@@ -1,6 +1,7 @@
 import os
+import rag
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from openai import OpenAI
 from fastapi.responses import StreamingResponse, FileResponse
@@ -65,10 +66,13 @@ SYSTEM_PROMPT = (
     "You are Atlas, a friendly assistant for someone learning AI engineering. "
     "Keep answers short and clear, use plain language, and give a small example "
     "when you explain something."
+    """When the user asks about their documents or files, always call search_documents first.
+    Base your answer only on the passages it returns. Quote or paraphrase them, and name the source file.
+    If the passages don't contain the answer, say you couldn't find it in their documents. Never fill gaps with outside knowledge."""
 )
 
 MAX_HISTORY = 20
-USER_TOOLS = {"save_note", "list_notes"}
+USER_TOOLS = {"save_note", "list_notes", "search_documents"}
 
 @app.get("/conversations", response_model=list[ConversationOut])
 def list_conversations(
@@ -131,9 +135,10 @@ def login(user: UserCreate, db: Session = Depends(get_db)): # Call 'get_db' for 
 
     # Anyone can read a token's payload, but nobody can change it (for example, swap the username) without breaking the signature, unless they have your secret key.
     # The server can therefore trust any token that verifies.
+    
 @app.get("/")
 def index():
-    return FileResponse("index.html") # The server sends back index.html. The browser shows your chat page.
+    return FileResponse("index.html", headers={"Cache-Control": "no-cache"}) # The server sends back index.html. The browser shows your chat page.
 
 
 @app.post("/chat")
@@ -201,7 +206,7 @@ def stream_with_tools(messages, user_id, max_rounds=5):
                 args = json.loads(c["arguments"] or "{}")
                 if c["name"] in USER_TOOLS:
                     args["user_id"] = user_id  # overwrite anything the model sent
-                    result = AVAILABLE_TOOLS[c["name"]](**args)
+                result = AVAILABLE_TOOLS[c["name"]](**args)
             except Exception as e:
                 result = {"error": f"Tool failed: {e}"}
             print(f"[tool] {c['name']}({c['arguments']}) -> {result}")
@@ -263,3 +268,39 @@ def chat_stream(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.post("/documents")
+def upload_document(
+    file: UploadFile = File(...),
+    username: str = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # get the logged-in user the same way chat_stream does
+    user = db.query(models.User).filter(models.User.username == username).first()
+
+    text = rag.extract_text(file)
+    chunks = rag.chunk_text(text)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="No readable text found in the file")
+
+    vectors = rag.embed_texts(chunks)
+
+    # re-uploading a file replaces the old copy
+    old = db.query(models.Document).filter(
+        models.Document.user_id == user.id,
+        models.Document.filename == file.filename,
+    ).all()
+    for d in old:
+        db.delete(d)
+    db.flush()
+
+    doc = models.Document(user_id=user.id, filename=file.filename)
+    db.add(doc)
+    db.flush()  # gives doc an id without committing yet
+    db.add_all([
+        models.Chunk(document_id=doc.id, user_id=user.id, content=c, embedding=v)
+        for c, v in zip(chunks, vectors)
+    ])
+    db.commit()
+    return {"document_id": doc.id, "filename": doc.filename, "chunks": len(chunks)} 

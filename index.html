@@ -1,80 +1,416 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chat</title>
+  <!-- markdown rendering; async so the page never waits on the CDN -->
+  <script async src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script async src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
-    body { font-family: sans-serif; margin: 0; }
-    #auth { max-width: 500px; margin: 3rem auto; padding: 0 1rem; }
-    #chat { display: none; height: 100vh; }
-    #sidebar { width: 260px; flex-shrink: 0; border-right: 1px solid #ddd; padding: 1rem; box-sizing: border-box; display: flex; flex-direction: column; gap: 0.5rem; }
-    #conv-list { flex: 1; overflow-y: auto; }
-    .conv { padding: 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .conv:hover { background: #f0f0f0; }
-    .conv.active { background: #dde7ff; }
-    #main { flex: 1; display: flex; flex-direction: column; padding: 1rem; box-sizing: border-box; min-width: 0; }
-    #log { flex: 1; border: 1px solid #ccc; border-radius: 8px; padding: 1rem; overflow-y: auto; margin-bottom: 1rem; }
-    .msg { white-space: pre-wrap; margin: 0.5rem 0; }
-    .user { color: #1a4fd6; }
-    .status { color: #888; font-style: italic; }
-    input { padding: 0.5rem; }
-    #message { width: 75%; }
-    #error { color: #c00; }
+    :root {
+      --bg: #f7f7f8;
+      --panel: #ffffff;
+      --sidebar: #f0f0f3;
+      --text: #1d1d22;
+      --muted: #6b6b76;
+      --border: #e3e3e8;
+      --hover: #e6e6eb;
+      --accent: #3b5bdb;
+      --accent-text: #ffffff;
+      --user-bubble: #3b5bdb;
+      --user-text: #ffffff;
+      --bot-bubble: #ffffff;
+      --code-bg: #f1f1f4;
+      --danger: #c92a2a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #16171a;
+        --panel: #1e1f23;
+        --sidebar: #1a1b1e;
+        --text: #ececf1;
+        --muted: #9a9aa5;
+        --border: #2c2d33;
+        --hover: #2a2b31;
+        --accent: #5c7cfa;
+        --user-bubble: #3b5bdb;
+        --bot-bubble: #24252a;
+        --code-bg: #2a2b31;
+        --danger: #ff6b6b;
+        --shadow: none;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 15px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    button, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+
+    /* ---------- auth ---------- */
+    #auth {
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .card {
+      width: 100%;
+      max-width: 360px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 650; font-size: 1.15rem; }
+    .logo {
+      width: 30px; height: 30px; border-radius: 8px;
+      background: var(--accent); color: var(--accent-text);
+      display: grid; place-items: center; font-size: 0.95rem; font-weight: 700;
+    }
+    .card p.sub { color: var(--muted); margin: 6px 0 20px; font-size: 0.92rem; }
+    .field {
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      outline: none;
+    }
+    .field:focus { border-color: var(--accent); }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 9px 14px;
+    }
+    .btn:hover { background: var(--hover); }
+    .btn.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+    .btn.primary:hover { filter: brightness(1.08); }
+    .btn:disabled { opacity: 0.55; cursor: default; }
+    .auth-actions { display: flex; gap: 8px; margin-top: 6px; }
+    .auth-actions .btn { flex: 1; }
+    #error { color: var(--danger); font-size: 0.9rem; min-height: 1.2em; margin: 12px 0 0; }
+
+    /* ---------- layout ---------- */
+    #chat { display: none; height: 100%; }
+    #sidebar {
+      width: 280px;
+      flex-shrink: 0;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      gap: 12px;
+    }
+    #sidebar .btn.primary { width: 100%; }
+    .section-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin: 4px 4px 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    #conv-list { flex: 1; overflow-y: auto; min-height: 80px; }
+    .conv {
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.92rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .conv:hover { background: var(--hover); }
+    .conv.active { background: var(--panel); box-shadow: var(--shadow); font-weight: 550; }
+    .empty-note { color: var(--muted); font-size: 0.85rem; padding: 4px 10px; }
+
+    #docs { border-top: 1px solid var(--border); padding-top: 10px; }
+    #doc-list { max-height: 180px; overflow-y: auto; }
+    .doc {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+    }
+    .doc:hover { background: var(--hover); }
+    .doc-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .doc-meta { color: var(--muted); font-size: 0.78rem; flex-shrink: 0; }
+    .icon-btn {
+      border: none;
+      background: none;
+      color: var(--muted);
+      padding: 2px 6px;
+      border-radius: 6px;
+      line-height: 1;
+    }
+    .icon-btn:hover { color: var(--danger); background: var(--panel); }
+    .link-btn { border: none; background: none; color: var(--accent); font-size: 0.8rem; padding: 0; text-transform: none; letter-spacing: 0; }
+    #upload-status { font-size: 0.8rem; color: var(--muted); padding: 4px 10px 0; min-height: 1em; }
+
+    .user-row {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .avatar-sm {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--hover); display: grid; place-items: center;
+      font-size: 0.8rem; font-weight: 650; flex-shrink: 0;
+    }
+    #user-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+
+    #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+    header {
+      height: 52px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+    #menu-btn { display: none; }
+    #chat-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    #log { flex: 1; overflow-y: auto; padding: 24px 16px; }
+    .thread { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    .row { display: flex; gap: 10px; }
+    .row.user { justify-content: flex-end; }
+    .bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .row.user .bubble {
+      background: var(--user-bubble);
+      color: var(--user-text);
+      border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
+    }
+    .row.bot .bubble {
+      background: var(--bot-bubble);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+      box-shadow: var(--shadow);
+    }
+    .bot-avatar {
+      width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+      background: var(--accent); color: var(--accent-text);
+      display: grid; place-items: center; font-size: 0.8rem; font-weight: 700;
+    }
+    .bubble p { margin: 0 0 0.6em; }
+    .bubble p:last-child, .bubble ul:last-child, .bubble ol:last-child { margin-bottom: 0; }
+    .bubble ul, .bubble ol { margin: 0 0 0.6em; padding-left: 1.3em; }
+    .bubble code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.88em; }
+    .bubble pre { background: var(--code-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; }
+    .bubble pre code { background: none; padding: 0; }
+    .bubble table { border-collapse: collapse; margin: 0.4em 0; }
+    .bubble th, .bubble td { border: 1px solid var(--border); padding: 4px 8px; }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-style: italic;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+
+    #welcome { text-align: center; margin: 8vh auto 0; max-width: 520px; }
+    #welcome h2 { margin: 0 0 6px; font-size: 1.4rem; }
+    #welcome p { color: var(--muted); margin: 0 0 20px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .chip {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 0.88rem;
+    }
+    .chip:hover { background: var(--hover); }
+
+    #composer-wrap { padding: 12px 16px 18px; }
+    #chat-form {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 8px 8px 8px 14px;
+      box-shadow: var(--shadow);
+    }
+    #chat-form:focus-within { border-color: var(--accent); }
+    #message {
+      flex: 1;
+      border: none;
+      outline: none;
+      background: transparent;
+      resize: none;
+      max-height: 180px;
+      padding: 6px 0;
+      line-height: 1.45;
+    }
+    .hint { max-width: 760px; margin: 6px auto 0; font-size: 0.75rem; color: var(--muted); text-align: center; }
+
+    /* ---------- small screens ---------- */
+    @media (max-width: 760px) {
+      #sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 10;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+      }
+      #sidebar.open { transform: translateX(0); box-shadow: 0 0 40px rgba(0, 0, 0, 0.25); }
+      #menu-btn { display: inline-block; }
+      .bubble { max-width: 92%; }
+    }
   </style>
 </head>
 <body>
-  <!-- Login / signup -->
+  <!-- ========== login / signup ========== -->
   <div id="auth">
-    <h1>Chat</h1>
-    <form id="auth-form">
-      <input id="username" placeholder="username" required>
-      <input id="password" type="password" placeholder="password" required>
-      <button type="submit">Log in</button>
-      <button type="button" id="signup-btn">Sign up</button>
-    </form>
-    <p id="error"></p>
+    <div class="card">
+      <div class="brand"><div class="logo">AI</div>Chat</div>
+      <p class="sub">Chat with tools, notes, and your own documents.</p>
+      <form id="auth-form">
+        <input id="username" class="field" placeholder="Username" autocomplete="username" required>
+        <input id="password" class="field" type="password" placeholder="Password" autocomplete="current-password" required>
+        <div class="auth-actions">
+          <button type="submit" class="btn primary">Log in</button>
+          <button type="button" id="signup-btn" class="btn">Sign up</button>
+        </div>
+      </form>
+      <p id="error"></p>
+    </div>
   </div>
 
-  <!-- Chat -->
+  <!-- ========== chat ========== -->
   <div id="chat">
-    <div id="sidebar">
-      <button id="new-chat-btn">+ New chat</button>
+    <aside id="sidebar">
+      <div class="brand"><div class="logo">AI</div>Chat</div>
+      <button id="new-chat-btn" class="btn primary">+ New chat</button>
+
+      <div class="section-title">Chats</div>
       <div id="conv-list"></div>
-      <button id="logout-btn">Log out</button>
-    </div>
-    <div id="main">
-      <div id="log"></div>
-      <form id="chat-form">
-        <input id="message" placeholder="Type a message" autocomplete="off" required>
-        <button type="submit">Send</button>
-      </form>
-    </div>
+
+      <div id="docs">
+        <div class="section-title">
+          <span>Documents</span>
+          <button id="upload-btn" class="link-btn" type="button">+ Upload</button>
+        </div>
+        <input type="file" id="doc-input" accept=".pdf,.txt,.md" hidden>
+        <div id="doc-list"></div>
+        <div id="upload-status"></div>
+      </div>
+
+      <div class="user-row">
+        <div class="avatar-sm" id="user-initial">?</div>
+        <div id="user-name"></div>
+        <button id="logout-btn" class="btn" type="button">Log out</button>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header>
+        <button id="menu-btn" class="btn" type="button" aria-label="Menu">☰</button>
+        <div id="chat-title">New chat</div>
+      </header>
+
+      <div id="log">
+        <div class="thread" id="thread"></div>
+      </div>
+
+      <div id="composer-wrap">
+        <form id="chat-form">
+          <textarea id="message" rows="1" placeholder="Message the assistant..." autocomplete="off"></textarea>
+          <button type="submit" id="send-btn" class="btn primary">Send</button>
+        </form>
+        <div class="hint">Enter to send, Shift+Enter for a new line</div>
+      </div>
+    </main>
   </div>
 
   <script>
-    let token = null;
-    let conversationId = crypto.randomUUID();
-
-    const authBox = document.getElementById("auth");
-    const chatBox = document.getElementById("chat");
-    const errorEl = document.getElementById("error");
-    const log = document.getElementById("log");
-    const list = document.getElementById("conv-list");
-
-    function showChat() {
-      authBox.style.display = "none";
-      chatBox.style.display = "flex";
-      errorEl.textContent = "";
+    // crypto.randomUUID only exists on secure origins (https or localhost)
+    function newId() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+      });
     }
 
-    function showLogin(message) {
-      token = null;
-      conversationId = crypto.randomUUID();
-      log.innerHTML = "";
-      list.innerHTML = "";
-      chatBox.style.display = "none";
-      authBox.style.display = "block";
-      errorEl.textContent = message || "";
+    let token = null;
+    let username = "";
+    let conversationId = newId();
+    let busy = false;
+
+    const $ = (id) => document.getElementById(id);
+    const authBox = $("auth");
+    const chatBox = $("chat");
+    const errorEl = $("error");
+    const log = $("log");
+    const thread = $("thread");
+    const convList = $("conv-list");
+    const docList = $("doc-list");
+    const docInput = $("doc-input");
+    const uploadStatus = $("upload-status");
+    const messageEl = $("message");
+    const sendBtn = $("send-btn");
+    const sidebar = $("sidebar");
+
+    const SUGGESTIONS = [
+      "What's the weather in Cairo?",
+      "Convert 100 USD to EGP",
+      "Save a note: call the dentist on Monday",
+      "Show my notes",
+      "What does my document say about this topic?",
+    ];
+
+    // ---------- helpers ----------
+    function renderMarkdown(el, text) {
+      if (window.marked && window.DOMPurify) {
+        el.innerHTML = DOMPurify.sanitize(marked.parse(text));
+      } else {
+        el.textContent = text;
+        el.style.whiteSpace = "pre-wrap";
+      }
+    }
+
+    function scrollDown() {
+      log.scrollTop = log.scrollHeight;
     }
 
     // fetch with the token attached; returns null if the session expired
@@ -90,56 +426,223 @@
       return res;
     }
 
-    function addMessage(role, text) {
-      const el = document.createElement("div");
-      el.className = "msg " + role;
-      el.textContent = text;
-      log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
-      return el;
+    // ---------- screens ----------
+    function showChat() {
+      authBox.style.display = "none";
+      chatBox.style.display = "flex";
+      errorEl.textContent = "";
+      $("user-name").textContent = username;
+      $("user-initial").textContent = (username[0] || "?").toUpperCase();
     }
 
+    function showLogin(message) {
+      token = null;
+      username = "";
+      conversationId = newId();
+      thread.innerHTML = "";
+      convList.innerHTML = "";
+      docList.innerHTML = "";
+      uploadStatus.textContent = "";
+      chatBox.style.display = "none";
+      authBox.style.display = "flex";
+      errorEl.textContent = message || "";
+    }
+
+    function showWelcome() {
+      thread.innerHTML = "";
+      const box = document.createElement("div");
+      box.id = "welcome";
+      box.innerHTML = "<h2>How can I help?</h2><p>Ask anything, use a tool, or upload a document and ask about it.</p>";
+      const chips = document.createElement("div");
+      chips.className = "chips";
+      for (const s of SUGGESTIONS) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.textContent = s;
+        chip.addEventListener("click", () => sendMessage(s));
+        chips.appendChild(chip);
+      }
+      box.appendChild(chips);
+      thread.appendChild(box);
+    }
+
+    // ---------- messages ----------
+    function addUserMessage(text) {
+      $("welcome")?.remove();
+      const row = document.createElement("div");
+      row.className = "row user";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      scrollDown();
+    }
+
+    function addBotMessage(text) {
+      $("welcome")?.remove();
+      const row = document.createElement("div");
+      row.className = "row bot";
+      const avatar = document.createElement("div");
+      avatar.className = "bot-avatar";
+      avatar.textContent = "AI";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      if (text) renderMarkdown(bubble, text);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      thread.appendChild(row);
+      scrollDown();
+      return bubble;
+    }
+
+    function setStatus(bubble, text) {
+      bubble.innerHTML = "";
+      const pill = document.createElement("span");
+      pill.className = "status-pill";
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      const label = document.createElement("span");
+      label.textContent = text;
+      pill.appendChild(dot);
+      pill.appendChild(label);
+      bubble.appendChild(pill);
+    }
+
+    function toolLabel(name) {
+      const labels = {
+        get_weather: "Checking the weather",
+        calculate: "Calculating",
+        convert_currency: "Converting currency",
+        save_note: "Saving your note",
+        list_notes: "Reading your notes",
+        search_documents: "Searching your documents",
+      };
+      return (labels[name] || "Using " + name) + "...";
+    }
+
+    // ---------- conversations ----------
     async function loadConversations() {
       const res = await api("/conversations");
       if (!res || !res.ok) return;
       const items = await res.json();
-      list.innerHTML = "";
+      convList.innerHTML = "";
+      if (items.length === 0) {
+        convList.innerHTML = '<div class="empty-note">No chats yet</div>';
+        return;
+      }
       for (const c of items) {
         const el = document.createElement("div");
         el.className = "conv" + (c.id === conversationId ? " active" : "");
         el.textContent = c.title || "Untitled chat";
-        el.addEventListener("click", () => openConversation(c.id));
-        list.appendChild(el);
+        el.title = c.title || "Untitled chat";
+        el.addEventListener("click", () => openConversation(c.id, c.title));
+        convList.appendChild(el);
       }
     }
 
-    async function openConversation(id) {
+    async function openConversation(id, title) {
+      if (busy) return;
       const res = await api(`/conversations/${id}/messages`);
       if (!res || !res.ok) return;
       const messages = await res.json();
       conversationId = id;
-      log.innerHTML = "";
+      $("chat-title").textContent = title || "Untitled chat";
+      thread.innerHTML = "";
       for (const m of messages) {
-        if (m.role === "user") addMessage("user", "You: " + m.content);
-        else addMessage("bot", m.content);
+        if (m.role === "user") addUserMessage(m.content);
+        else addBotMessage(m.content);
       }
+      if (messages.length === 0) showWelcome();
+      sidebar.classList.remove("open");
       loadConversations();
     }
 
     function newChat() {
-      conversationId = crypto.randomUUID();
-      log.innerHTML = "";
+      if (busy) return;
+      conversationId = newId();
+      $("chat-title").textContent = "New chat";
+      showWelcome();
+      sidebar.classList.remove("open");
       loadConversations();
+      messageEl.focus();
     }
 
-    // ----- auth -----
+    // ---------- documents ----------
+    async function loadDocuments() {
+      const res = await api("/documents");
+      if (!res || !res.ok) return;
+      const docs = await res.json();
+      docList.innerHTML = "";
+      if (docs.length === 0) {
+        docList.innerHTML = '<div class="empty-note">No documents yet</div>';
+        return;
+      }
+      for (const d of docs) {
+        const row = document.createElement("div");
+        row.className = "doc";
+        const name = document.createElement("span");
+        name.className = "doc-name";
+        name.textContent = d.filename;
+        name.title = d.filename;
+        const meta = document.createElement("span");
+        meta.className = "doc-meta";
+        meta.textContent = d.chunks + " chunks";
+        const del = document.createElement("button");
+        del.className = "icon-btn";
+        del.type = "button";
+        del.title = "Delete document";
+        del.textContent = "✕";
+        del.addEventListener("click", () => deleteDocument(d.id, d.filename));
+        row.appendChild(name);
+        row.appendChild(meta);
+        row.appendChild(del);
+        docList.appendChild(row);
+      }
+    }
+
+    async function deleteDocument(id, filename) {
+      if (!confirm(`Delete "${filename}"?`)) return;
+      const res = await api(`/documents/${id}`, { method: "DELETE" });
+      if (!res) return;
+      uploadStatus.textContent = res.ok ? "Deleted " + filename : "Could not delete";
+      loadDocuments();
+    }
+
+    $("upload-btn").addEventListener("click", () => docInput.click());
+
+    docInput.addEventListener("change", async () => {
+      const file = docInput.files[0];
+      if (!file) return;
+      uploadStatus.textContent = "Uploading " + file.name + "...";
+
+      const form = new FormData();
+      form.append("file", file);
+
+      try {
+        // no Content-Type header: the browser sets the multipart boundary itself
+        const res = await api("/documents", { method: "POST", body: form });
+        if (!res) return;
+        const data = await res.json();
+        uploadStatus.textContent = res.ok
+          ? "Added " + data.filename + " (" + data.chunks + " chunks)"
+          : (data.detail || "Upload failed");
+        loadDocuments();
+      } catch (e) {
+        uploadStatus.textContent = "Upload failed";
+      }
+      docInput.value = "";
+    });
+
+    // ---------- auth ----------
     async function authRequest(path) {
-      const username = document.getElementById("username").value;
-      const password = document.getElementById("password").value;
+      const u = $("username").value;
+      const p = $("password").value;
       return fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: u, password: p }),
       });
     }
 
@@ -151,16 +654,20 @@
       }
       const data = await res.json();
       token = data.access_token;
+      username = $("username").value;
+      $("password").value = "";
       showChat();
       newChat();
+      loadDocuments();
     }
 
-    document.getElementById("auth-form").addEventListener("submit", (e) => {
+    $("auth-form").addEventListener("submit", (e) => {
       e.preventDefault();
       login();
     });
 
-    document.getElementById("signup-btn").addEventListener("click", async () => {
+    $("signup-btn").addEventListener("click", async () => {
+      if (!$("auth-form").reportValidity()) return;
       const res = await authRequest("/signup");
       if (!res.ok) {
         errorEl.textContent = "Could not sign up (username may be taken)";
@@ -169,67 +676,100 @@
       await login();
     });
 
-    document.getElementById("logout-btn").addEventListener("click", () => showLogin(""));
-    document.getElementById("new-chat-btn").addEventListener("click", newChat);
+    $("logout-btn").addEventListener("click", () => showLogin(""));
+    $("new-chat-btn").addEventListener("click", newChat);
+    $("menu-btn").addEventListener("click", () => sidebar.classList.toggle("open"));
 
-    // ----- sending a message -----
-    document.getElementById("chat-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const input = document.getElementById("message");
-      const text = input.value;
-      input.value = "";
-
-      addMessage("user", "You: " + text);
-      const botEl = addMessage("bot", "");
-
-      const res = await api("/chat/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: conversationId, message: text }),
-      });
-      if (!res) return;
-      if (!res.ok) {
-        botEl.textContent = "Error " + res.status;
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const events = buffer.split("\n\n");
-        buffer = events.pop();
-
-        for (const event of events) {
-          if (!event.startsWith("data: ")) continue;
-          const payload = event.slice(6);
-          if (payload === "[DONE]") {
-            loadConversations();   // refresh the sidebar (new chats appear here)
-            return;
-          }
-
-          const data = JSON.parse(payload);
-          if (data.tool) {
-            // a tool is running: show a status line
-            botEl.textContent = "Using " + data.tool + "...";
-            botEl.classList.add("status");
-          } else if (data.text) {
-            // real answer text: clear the status line first
-            if (botEl.classList.contains("status")) {
-              botEl.textContent = "";
-              botEl.classList.remove("status");
-            }
-            botEl.textContent += data.text;
-          }
-          log.scrollTop = log.scrollHeight;
-        }
+    // ---------- composer ----------
+    function autoGrow() {
+      messageEl.style.height = "auto";
+      messageEl.style.height = Math.min(messageEl.scrollHeight, 180) + "px";
+    }
+    messageEl.addEventListener("input", autoGrow);
+    messageEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        $("chat-form").requestSubmit();
       }
     });
+
+    $("chat-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = messageEl.value.trim();
+      if (!text) return;
+      messageEl.value = "";
+      autoGrow();
+      sendMessage(text);
+    });
+
+    function setBusy(value) {
+      busy = value;
+      sendBtn.disabled = value;
+    }
+
+    // ---------- sending a message ----------
+    async function sendMessage(text) {
+      if (busy) return;
+      setBusy(true);
+      if ($("chat-title").textContent === "New chat") {
+        $("chat-title").textContent = text.slice(0, 40);
+      }
+
+      addUserMessage(text);
+      const bubble = addBotMessage("");
+      setStatus(bubble, "Thinking...");
+
+      let reply = "";
+      try {
+        const res = await api("/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation_id: conversationId, message: text }),
+        });
+        if (!res) return;
+        if (!res.ok) {
+          bubble.textContent = "Something went wrong (error " + res.status + ").";
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const events = buffer.split("\n\n");
+          buffer = events.pop();
+
+          for (const event of events) {
+            if (!event.startsWith("data: ")) continue;
+            const payload = event.slice(6);
+            if (payload === "[DONE]") {
+              loadConversations();   // refresh the sidebar (new chats appear here)
+              return;
+            }
+
+            const data = JSON.parse(payload);
+            if (data.tool) {
+              // a tool is running: show a status line
+              setStatus(bubble, toolLabel(data.tool));
+            } else if (data.text) {
+              // real answer text: replace the status line and render markdown
+              reply += data.text;
+              renderMarkdown(bubble, reply);
+            }
+            scrollDown();
+          }
+        }
+      } catch (e) {
+        bubble.textContent = "Connection lost. Please try again.";
+      } finally {
+        setBusy(false);
+      }
+    }
   </script>
 </body>
 </html>

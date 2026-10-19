@@ -2,6 +2,7 @@ import httpx
 
 from db import SessionLocal
 import models
+import rag 
 
 # Turn Open-Meteo's numeric weather code into a readable word
 def describe(code):
@@ -116,6 +117,18 @@ def list_notes(user_id, limit=20):
             ]
         }
 
+def search_documents(query, user_id):
+    results = rag.search_chunks(user_id, query, k=4)
+    if not results:
+        return {"context": "", "note": "No documents found for this user."}
+    context = "\n\n".join(
+        f"[Source {i + 1}: {r['filename']}]\n{r['content']}"
+        for i, r in enumerate(results)
+    )
+    return {
+        "instructions": "Answer the user's question using only these sources. Cite them like [Source 1].",
+        "context": context,
+    }
 
 # The menu we show the model
 TOOLS = [
@@ -153,8 +166,7 @@ TOOLS = [
             },
         },
     },
-
-        {
+    {
         "type": "function",
         "function": {
             "name": "convert_currency",
@@ -170,8 +182,7 @@ TOOLS = [
             },
         },
     },
-
-        {
+    {
         "type": "function",
         "function": {
             "name": "save_note",
@@ -192,12 +203,29 @@ TOOLS = [
             "description": "Show the user's saved notes, newest first",
             "parameters": {"type": "object", "properties": {}},
         },
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_documents",
+            "description": "Search the user's uploaded documents for passages relevant to a question. Use this whenever the user asks about the contents of their files or documents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "What to look for, phrased as a short search query"}
+                },
+                "required": ["query"],
+            },
+        },
+    },
 ]
 
 # Map tool names to the real Python functions
-AVAILABLE_TOOLS = {"get_weather": get_weather,
-                    "calculate": calculate,
-                    "convert_currency": convert_currency,
-                    "save_note": save_note,
-                    "list_notes": list_notes}
+AVAILABLE_TOOLS = {
+    "get_weather": get_weather,
+    "calculate": calculate,
+    "convert_currency": convert_currency,
+    "save_note": save_note,
+    "list_notes": list_notes,
+    "search_documents": search_documents,
+}
