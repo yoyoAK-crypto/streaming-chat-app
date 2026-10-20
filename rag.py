@@ -60,7 +60,7 @@ def extract_text(file):
 def search_chunks(user_id, query, k=4):
     # Embed the question with the same model used for the chunks, so they can be compared.
     # embed_texts takes a list and returns a list, hence [query] in and [0] out.
-    qv = np.array(embed_texts([query])[0])
+    qv = np.array(embed_texts(["Represent this sentence for searching relevant passages: " + query])[0])
     with SessionLocal() as db:
         # Load every chunk that belongs to this user, plus the name of the file it came from.
         # The join links each chunk to its document so we can read Document.filename.
