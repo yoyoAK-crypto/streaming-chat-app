@@ -126,8 +126,8 @@ def search_documents(query, user_id):
         for i, r in enumerate(results)
     )
     return {
-        "instructions": "Answer the user's question using only these sources. Cite them like [Source 1].",
-        "context": context,
+                "instructions": "Use these sources to answer questions about the user's documents. "
+                        "This does not apply to other topics, such as weather or calculations.",
     }
 
 # The menu we show the model

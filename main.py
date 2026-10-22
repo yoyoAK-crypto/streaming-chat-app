@@ -70,6 +70,7 @@ SYSTEM_PROMPT = (
     """When the user asks about their documents or files, always call search_documents first.
     Base your answer only on the passages it returns. Quote or paraphrase them, and name the source file.
     If the passages don't contain the answer, say you couldn't find it in their documents. Never fill gaps with outside knowledge."""
+    "For weather, currency, calculations, or notes, always use the matching tool, even if documents were discussed earlier in the conversation."
 )
 
 MAX_HISTORY = 20
