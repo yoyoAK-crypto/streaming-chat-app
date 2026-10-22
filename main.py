@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 import json
 from datetime import datetime
+from sqlalchemy import func
 
 import models
 from db import engine, SessionLocal, Base, get_db
@@ -269,6 +270,31 @@ def chat_stream(
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
+@app.get("/documents")
+def list_documents(username: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == username).first()
+    rows = (
+        db.query(models.Document.id, models.Document.filename, func.count(models.Chunk.id))
+        .outerjoin(models.Chunk, models.Chunk.document_id == models.Document.id)
+        .filter(models.Document.user_id == user.id)
+        .group_by(models.Document.id)
+        .order_by(models.Document.id.desc())
+        .all()
+    )
+    return [{"id": i, "filename": f, "chunks": n} for i, f, n in rows]
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: int, username: str = Depends(get_current_user), db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.username == username).first()
+    doc = db.query(models.Document).filter(
+        models.Document.id == doc_id, models.Document.user_id == user.id
+    ).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(doc)
+    db.commit()
+    return {"deleted": doc_id}
 
 @app.post("/documents")
 def upload_document(
