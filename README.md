@@ -2,6 +2,17 @@
 
 A chat app where replies stream in token by token. The assistant can call tools, save notes for each user, and answer questions about documents you upload, citing its sources. Built with FastAPI, PostgreSQL and the Groq API, and runs with one `docker compose up`.
 
+**Live demo:** https://streaming-chat-app.onrender.com
+*(Free hosting: the first load after a quiet period takes about a minute while the server wakes up.)*
+
+### Run with Docker
+
+1. Create a `.env` file with `GROQ_API_KEY` and `SECRET_KEY`
+2. `docker compose up --build`
+3. Open http://localhost:8000
+
+See [Quick start (Docker)](#quick-start-docker) for the full steps.
+
 ## Features
 
 **Chat**
@@ -111,6 +122,14 @@ The embedding model is downloaded while the image is built, so document search w
 - **Existing database:** runs any Alembic migrations it hasn't had yet.
 
 Use it instead of `alembic upgrade head` on a fresh database. The first migration is an empty baseline, so the migrations alone can't build the tables from scratch.
+
+## Deployment
+
+The live demo runs on free tiers:
+- **App:** [Render](https://render.com), built from the `Dockerfile`. `init_db.py` runs on every start, so the tables are created or migrated automatically.
+- **Database:** [Neon](https://neon.tech) serverless Postgres. Set `DATABASE_URL` in Render's environment settings to your Neon connection string, along with `GROQ_API_KEY` and `SECRET_KEY`.
+
+**Large uploads:** the free Render instance has limited memory, and every chunk of an uploaded file is embedded in one request. Very large documents can run out of memory and fail, so keep uploads small on the demo, or use a paid instance.
 
 ## How it works
 
