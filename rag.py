@@ -13,7 +13,7 @@ _model = None
 def get_model():
     global _model
     if _model is None:
-        _model = TextEmbedding("BAAI/bge-small-en-v1.5")
+        _model = TextEmbedding("BAAI/bge-small-en-v1.5", threads=1)
     return _model
 
 
@@ -43,7 +43,7 @@ def embed_texts(texts):
     # get_model() loads the embedding model once and reuses it.
     # .embed() gives back numpy arrays; .tolist() turns each into a plain Python list
     # so it can be saved in the Postgres ARRAY(Float) column.
-    return [v.tolist() for v in get_model().embed(texts)]
+    return [v.tolist() for v in get_model().embed(texts, batch_size=16)]
 
 def extract_text(file):
     name = (file.filename or "").lower()
